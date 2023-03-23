@@ -28,7 +28,9 @@ from .model import to_torch, to_gpu, ModelWrapper
 from .losses import compute_target
 from .connection import MultiProcessJobExecutor
 from .worker import WorkerCluster, WorkerServer
-
+import wandb 
+from logging import getLogger
+logger = getLogger("main").getChild("train")
 
 def make_batch(episodes, args):
     """Making training batch
@@ -70,7 +72,7 @@ def make_batch(episodes, args):
         else:
             obs = [[replace_none(m['observation'][player], obs_zeros) for player in players] for m in moments]
             prob = np.array([[[replace_none(m['selected_prob'][player], 1.0)] for player in players] for m in moments])
-            act = np.array([[replace_none(m['action'][player], 0) for player in players] for m in moments], dtype=np.int64)[..., np.newaxis]
+            act = np.array([[replace_none(m['action'][player], 0) for player in players] for m in moments], dtype=np.int64)[:, :, np.newaxis] #[..., np.newaxis]
             amask = np.array([[replace_none(m['action_mask'][player], amask_zeros + 1e32) for player in players] for m in moments])
 
         # reshape observation
@@ -175,8 +177,8 @@ def forward_prediction(model, hidden, batch, args):
         outputs = {k: torch.stack(o, dim=1) for k, o in outputs.items() if o[0] is not None}
 
     for k, o in outputs.items():
-        if k == 'policy':
-            o = o.mul(batch['turn_mask'])
+        if 'policy' in k:
+            # o = o.mul(batch['turn_mask'])
             if o.size(2) > 1 and batch_shape[2] == 1:  # turn-alternating batch
                 o = o.sum(2, keepdim=True)  # gather turn player's policies
             outputs[k] = o - batch['action_mask']
@@ -205,8 +207,8 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
         losses['v'] = ((outputs['value'] - targets['value']) ** 2).mul(omasks).sum() / 2
     if 'return' in outputs:
         losses['r'] = F.smooth_l1_loss(outputs['return'], targets['return'], reduction='none').mul(omasks).sum()
-
-    entropy = dist.Categorical(logits=outputs['policy']).entropy().mul(tmasks.sum(-1))
+    logits = outputs['robot_policy'].transpose(3,4).transpose(4,5)  # chを最後に持ってくる
+    entropy = dist.Categorical(logits=logits).entropy().sum(dim=(-1,-2)).mul(tmasks.sum(-1))
     losses['ent'] = entropy.sum()
 
     base_loss = losses['p'] + losses.get('v', 0) + losses.get('r', 0)
@@ -229,12 +231,12 @@ def compute_loss(batch, model, hidden, args):
 
     clip_rho_threshold, clip_c_threshold = 1.0, 1.0
 
-    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob'], 1e-16, 1)) * emasks
-    log_selected_t_policies = F.log_softmax(outputs['policy'], dim=-1).gather(-1, actions) * emasks
+    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob'], 1e-16, 1))  # * emasks
+    log_selected_t_policies = F.log_softmax(outputs['robot_policy'], dim=-3).gather(-3, actions)  #* emasks
 
     # thresholds of importance sampling
     log_rhos = log_selected_t_policies.detach() - log_selected_b_policies
-    rhos = torch.exp(log_rhos)
+    rhos = torch.exp(log_rhos) # .sum(dim=(4,5))
     clipped_rhos = torch.clamp(rhos, 0, clip_rho_threshold)
     cs = torch.clamp(rhos, 0, clip_c_threshold)
     outputs_nograd = {k: o.detach() for k, o in outputs.items()}
@@ -263,7 +265,7 @@ def compute_loss(batch, model, hidden, args):
         _, advantages['return'] = compute_target(args['policy_target'], *return_args)
 
     # compute policy advantage
-    total_advantages = clipped_rhos * sum(advantages.values())
+    total_advantages = clipped_rhos * sum(advantages.values()).unsqueeze(-1).unsqueeze(-1)
 
     return compose_losses(outputs, log_selected_t_policies, total_advantages, targets, batch, args)
 
@@ -378,8 +380,9 @@ class Trainer:
 
             self.steps += 1
 
-        print('loss = %s' % ' '.join([k + ':' + '%.3f' % (l / data_cnt) for k, l in loss_sum.items()]))
-
+        logger.info('loss = %s' % ' '.join([k + ':' + '%.3f' % (l / data_cnt) for k, l in loss_sum.items()]))
+        for k, v in loss_sum.items():
+            wandb.log({f'Loss/{k}': v/data_cnt})
         self.data_cnt_ema = self.data_cnt_ema * 0.8 + data_cnt / (1e-2 + batch_cnt) * 0.2
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = self.default_lr * self.data_cnt_ema / (1 + self.steps * 1e-5)
@@ -462,8 +465,9 @@ class Learner:
             for p in episode['args']['player']:
                 model_id = episode['args']['model_id'][p]
                 outcome = episode['outcome'][p]
-                n, r, r2 = self.generation_results.get(model_id, (0, 0, 0))
-                self.generation_results[model_id] = n + 1, r + outcome, r2 + outcome ** 2
+                n, r, r2, total_ep_len = self.generation_results.get(model_id, (0, 0, 0, 0))
+                ep_len = episode['steps']
+                self.generation_results[model_id] = n + 1, r + outcome, r2 + outcome ** 2, total_ep_len + ep_len
             self.num_returned_episodes += 1
             if self.num_returned_episodes % 100 == 0:
                 print(self.num_returned_episodes, end=' ', flush=True)
@@ -487,31 +491,35 @@ class Learner:
         for result in results:
             if result is None:
                 continue
+            ep_len = result['args']['ep_len']
             for p in result['args']['player']:
                 model_id = result['args']['model_id'][p]
                 res = result['result'][p]
-                n, r, r2 = self.results.get(model_id, (0, 0, 0))
-                self.results[model_id] = n + 1, r + res, r2 + res ** 2
+                n, r, r2, total_ep_len = self.results.get(model_id, (0, 0, 0, 0))
+                self.results[model_id] = n + 1, r + res, r2 + res ** 2, total_ep_len+ep_len
 
                 if model_id not in self.results_per_opponent:
                     self.results_per_opponent[model_id] = {}
                 opponent = result['opponent']
-                n, r, r2 = self.results_per_opponent[model_id].get(opponent, (0, 0, 0))
-                self.results_per_opponent[model_id][opponent] = n + 1, r + res, r2 + res ** 2
+                n, r, r2, total_ep_len = self.results_per_opponent[model_id].get(opponent, (0, 0, 0, 0))
+                self.results_per_opponent[model_id][opponent] = n + 1, r + res, r2 + res ** 2, total_ep_len+ep_len
 
     def update(self):
         # call update to every component
         print()
-        print('epoch %d' % self.model_epoch)
+        logger.info('epoch %d' % self.model_epoch)
 
         if self.model_epoch not in self.results:
-            print('win rate = Nan (0)')
+            logger.info('win rate = Nan (0)')
         else:
             def output_wp(name, results):
-                n, r, r2 = results
+                n, r, r2, total_ep_len = results
                 mean = r / (n + 1e-6)
                 name_tag = ' (%s)' % name if name != '' else ''
-                print('win rate%s = %.3f (%.1f / %d)' % (name_tag, (mean + 1) / 2, (r + n) / 2, n))
+                mean_ep_len = total_ep_len / n
+                logger.info('win rate%s = %.3f (%.1f / %d)' % (name_tag, (mean + 1) / 2, (r + n) / 2, n))
+                wandb.log({'evaluate/win_rate':(mean + 1) / 2})
+                wandb.log({'evaluate/mean_episode_length': mean_ep_len})
 
             keys = self.results_per_opponent[self.model_epoch]
             if len(self.args.get('eval', {}).get('opponent', [])) <= 1 and len(keys) <= 1:
@@ -524,10 +532,11 @@ class Learner:
         if self.model_epoch not in self.generation_results:
             print('generation stats = Nan (0)')
         else:
-            n, r, r2 = self.generation_results[self.model_epoch]
+            n, r, r2, total_ep_len = self.generation_results[self.model_epoch]
             mean = r / (n + 1e-6)
             std = (r2 / (n + 1e-6) - mean ** 2) ** 0.5
-            print('generation stats = %.3f +- %.3f' % (mean, std))
+            mean_ep_len = total_ep_len / n 
+            logger.info(f'generation stats = {mean:.3f} +- {std:.3f} / mean_ep_len: {mean_ep_len}')
 
         model, steps = self.trainer.update()
         if model is None:

@@ -13,6 +13,7 @@ import multiprocessing as mp
 import pickle
 import copy
 import queue
+import time 
 
 from .environment import prepare_env, make_env
 from .connection import QueueCommunicator
@@ -20,8 +21,9 @@ from .connection import send_recv, open_multiprocessing_connections
 from .connection import connect_socket_connection, accept_socket_connections
 from .evaluation import Evaluator
 from .generation import Generator
-from .model import ModelWrapper, RandomModel
-
+from .model import ModelWrapper, RandomModel, OnnxModelWrapper
+from logging import getLogger
+logger = getLogger("main").getChild("worker")
 
 class Worker:
     def __init__(self, args, conn, wid):
@@ -52,11 +54,12 @@ class Worker:
                 else:
                     # get model from server
                     model = pickle.loads(send_recv(self.conn, ('model', model_id)))
-                    if model_id == 0:
-                        # use random model
-                        self.env.reset()
-                        obs = self.env.observation(self.env.players()[0])
-                        model = RandomModel(model, obs)
+                    # if model_id == 0:
+                    #     # use random model
+                    #     self.env.reset()
+                    #     obs = self.env.observation(self.env.players()[0])
+                    #     model = RandomModel(model, obs)
+                    # model_pool[model_id] = OnnxModelWrapper(model)
                     model_pool[model_id] = ModelWrapper(model)
                     # update latest model
                     if model_id > self.latest_model[0]:
@@ -80,10 +83,14 @@ class Worker:
                     models[p] = model_pool[model_id]
 
             if role == 'g':
+                # start_time = time.time()
                 episode = self.generator.execute(models, args)
+                # logger.info(f"generate time: {time.time()-start_time:.3f}s")
                 send_recv(self.conn, ('episode', episode))
             elif role == 'e':
+                # start_time = time.time()
                 result = self.evaluator.execute(models, args)
+                # logger.info(f"evaluate time: {time.time()-start_time:.3f}s")
                 send_recv(self.conn, ('result', result))
 
 

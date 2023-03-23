@@ -9,8 +9,7 @@ import multiprocessing as mp
 
 from .environment import prepare_env, make_env
 from .connection import send_recv, accept_socket_connections, connect_socket_connection
-from .agent import RandomAgent, RuleBasedAgent, Agent, EnsembleAgent, SoftAgent
-
+from .agent import RuleBasedAgent, Agent, ImitationAgent
 
 network_match_port = 9876
 
@@ -141,12 +140,11 @@ def exec_network_match(env, network_agents, critic=None, show=False, game_args={
     return outcome
 
 
-def build_agent(raw, env=None):
-    if raw == 'random':
-        return RandomAgent()
-    elif raw.startswith('rulebase'):
-        key = raw.split('-')[1] if '-' in raw else None
-        return RuleBasedAgent(key)
+def build_agent(raw, env=None, player=None):
+    if raw == 'rulebased':
+        return RuleBasedAgent(player)
+    elif raw == 'imitation':
+        return ImitationAgent(player)
     return None
 
 
@@ -166,14 +164,16 @@ class Evaluator:
         agents = {}
         for p, model in models.items():
             if model is None:
-                agents[p] = build_agent(opponent, self.env)
+                agents[p] = build_agent(opponent, self.env, p)
             else:
                 agents[p] = Agent(model)
 
         outcome = exec_match(self.env, agents)
+        ep_len = self.env.env.state.real_env_steps
         if outcome is None:
             print('None episode in evaluation!')
             return None
+        args['ep_len'] = ep_len 
         return {'args': args, 'result': outcome, 'opponent': opponent}
 
 
@@ -383,14 +383,14 @@ def eval_main(args, argv):
     num_games = int(argv[1]) if len(argv) >= 2 else 100
     num_process = int(argv[2]) if len(argv) >= 3 else 1
 
-    def resolve_agent(model_path):
-        agent = build_agent(model_path, env)
+    def resolve_agent(model_path, player):
+        agent = build_agent(model_path, env, player)
         if agent is None:
             model = load_model(model_path, env.net())
             agent = Agent(model)
         return agent
 
-    main_agent = resolve_agent(model_paths[0])
+    main_agent = resolve_agent(model_paths[0], player='player_0')
     critic = None
 
     print('%d process, %d games' % (num_process, num_games))
@@ -399,7 +399,7 @@ def eval_main(args, argv):
     print('seed = %d' % seed)
 
     opponent = model_paths[1] if len(model_paths) > 1 else 'random'
-    agents = [main_agent] + [resolve_agent(opponent) for _ in range(len(env.players()) - 1)]
+    agents = [main_agent] + [resolve_agent(opponent, player='player_1') for _ in range(len(env.players()) - 1)]
 
     evaluate_mp(env, agents, critic, env_args, {'default': {}}, num_process, num_games, seed)
 

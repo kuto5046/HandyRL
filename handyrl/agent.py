@@ -8,7 +8,9 @@ import random
 import numpy as np
 
 from .util import softmax
-
+from exp.exp031.agent import get_factory_actions, get_robot_actions
+from lux.kit import EnvConfig
+env_cfg = EnvConfig()
 
 class RandomAgent:
     def reset(self, env, show=False):
@@ -23,14 +25,20 @@ class RandomAgent:
 
 
 class RuleBasedAgent(RandomAgent):
-    def __init__(self, key=None):
-        self.key = key
+    def __init__(self, player):
+        from agents_store.abishek.agent import Agent
+        self.agent = Agent(player, env_cfg)
 
+    def reset(self, env, show=False):
+        self.agent.env_cfg = env.env.env_cfg
+    
     def action(self, env, player, show=False):
-        if hasattr(env, 'rule_based_action'):
-            return env.rule_based_action(player, key=self.key)
+        _obs = env.obs_list[-1][player]
+        step = env.env.state.env_steps
+        if step < 0:
+            return self.agent.early_setup(step, _obs)
         else:
-            return random.choice(env.legal_actions(player))
+            return self.agent.act(step, _obs)
 
 
 def print_outputs(env, prob, v):
@@ -60,23 +68,16 @@ class Agent:
         return outputs
 
     def action(self, env, player, show=False):
+        real_env_steps = env.env.state.real_env_steps
+        assert real_env_steps >= 0
         obs = env.observation(player)
         outputs = self.plan(obs)
-        actions = env.legal_actions(player)
-        p = outputs['policy']
-        v = outputs.get('value', None)
-        mask = np.ones_like(p)
-        mask[actions] = 0
-        p = p - mask * 1e32
+        actions = dict()
+        game_state = env.get_game_state(player)
+        actions = get_factory_actions(game_state, player, actions)
+        actions = get_robot_actions(game_state, outputs['robot_policy'], player, actions)
+        return actions 
 
-        if show:
-            print_outputs(env, softmax(p), v)
-
-        if self.temperature == 0:
-            ap_list = sorted([(a, p[a]) for a in actions], key=lambda x: -x[1])
-            return ap_list[0][0]
-        else:
-            return random.choices(np.arange(len(p)), weights=softmax(p / self.temperature))[0]
 
     def observe(self, env, player, show=False):
         v = None
@@ -89,24 +90,23 @@ class Agent:
         return v
 
 
-class EnsembleAgent(Agent):
+class ImitationAgent(RandomAgent):
+    """ 
+    評価用の模倣Agent
+    """
+    def __init__(self, player):
+        from agents_store.exp019.agent import Agent
+        # env_cfg.ROBOTS['LIGHT'].ACTION_QUEUE_POWER_COST = 0
+        # env_cfg.ROBOTS['HEAVY'].ACTION_QUEUE_POWER_COST = 0
+        self.agent = Agent(player, env_cfg)
+
     def reset(self, env, show=False):
-        self.hidden = [model.init_hidden() for model in self.model]
+        self.agent.env_cfg = env.env.env_cfg
 
-    def plan(self, obs):
-        outputs = {}
-        for i, model in enumerate(self.model):
-            o = model.inference(obs, self.hidden[i])
-            for k, v in o.items():
-                if k == 'hidden':
-                    self.hidden[i] = v
-                else:
-                    outputs[k] = outputs.get(k, []) + [v]
-        for k, vl in outputs.items():
-            outputs[k] = np.mean(vl, axis=0)
-        return outputs
-
-
-class SoftAgent(Agent):
-    def __init__(self, model):
-        super().__init__(model, temperature=1.0)
+    def action(self, env, player, show=False):
+        _obs = env.obs_list[-1][player]
+        step = env.env.state.env_steps
+        if step < 0:
+            return self.agent.early_setup(step, _obs)
+        else:
+            return self.agent.act(step, _obs)
