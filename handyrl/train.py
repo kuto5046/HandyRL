@@ -190,19 +190,17 @@ def forward_prediction(model, hidden, batch, args):
 
 
 def compute_teacher_kl_loss(policy_logits, teacher_policy_logits, action_mask):
-    learner_policy_log_probs = F.log_softmax(policy_logits, dim=-1)
-    teacher_policy = F.softmax(teacher_policy_logits, dim=-1)
+    learner_policy_log_probs = F.log_softmax(policy_logits * action_mask.float(), dim=-3)
+    teacher_policy = F.softmax(teacher_policy_logits * action_mask.float(), dim=-3)
     kl_div = F.kl_div(
         learner_policy_log_probs,
         teacher_policy.detach(),
         reduction="none",
         log_target=False
-    ).sum(dim=-1)
+    )
 
-    # 無効な行動をmaskする
-    kl_div_masked = kl_div * action_mask.float()
     # Sum over y, x, and action_planes dimensions to combine kl divergences from different actions
-    return kl_div_masked.sum(dim=-1).sum(dim=-1).squeeze(dim=-2)
+    return kl_div.sum()
 
 
 def compose_losses(outputs, log_selected_policies, total_advantages, targets, batch, args):
@@ -231,7 +229,7 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
     base_loss = losses['p'] + losses.get('v', 0) + losses.get('r', 0)
     entropy_loss = entropy.mul(1 - batch['progress'] * (1 - args['entropy_regularization_decay'])).sum() * -args['entropy_regularization']
 
-    kl_loss = compute_teacher_kl_loss(logits, teacher_logits)
+    kl_loss = compute_teacher_kl_loss(logits, teacher_logits, batch['action_mask'])
     losses['kl'] = kl_loss 
     losses['total'] = base_loss + entropy_loss + kl_loss 
 
@@ -241,7 +239,7 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
 def compute_loss(batch, model, teacher_model, hidden, args):
     outputs = forward_prediction(model, hidden, batch, args)
     teacher_outputs = forward_prediction(teacher_model, hidden, batch, args)
-    outputs['teacher_logits'] = teacher_outputs['logits']
+    outputs['teacher_robot_policy'] = teacher_outputs['robot_policy']
     if args['burn_in_steps'] > 0:
         batch = map_r(batch, lambda v: v[:, args['burn_in_steps']:] if v.size(1) > 1 else v)
         outputs = map_r(outputs, lambda v: v[:, args['burn_in_steps']:])
@@ -379,8 +377,9 @@ class Trainer:
         batch_cnt, data_cnt, loss_sum = 0, 0, {}
         if self.gpu > 0:
             self.trained_model.cuda()
+            self.wrapped_teacher_model.cuda()
         self.trained_model.train()
-
+        self.wrapped_teacher_model.train()
         while data_cnt == 0 or not self.update_flag:
             batch = self.batcher.batch()
             batch_size = batch['value'].size(0)
