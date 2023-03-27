@@ -25,9 +25,10 @@ from luxai_s2 import LuxAI_S2
 from exp.exp031.src.observation import make_input
 from exp.exp031.src.early_step_policy import _early_setup
 from exp.exp031.src.unet import LuxUNetModel
-from exp.exp031.src.validatation import get_valid_robot_policy_map
+from exp.exp031.src.validation import get_valid_robot_policy_map
 
 MODEL_PATH = '/home/user/work/exp/exp031/models/best_robot_model.pth'
+TEACHER_MODEL_PATH = '/home/user/work/exp/exp031/models/best_robot_model.pth'
 
 seed = 2022
 
@@ -127,6 +128,14 @@ class Environment(BaseEnvironment):
         model = self.fix_net_parameters(model)
         return model 
 
+
+    def teacher_net(self):
+        model = LuxUNetModel(n_channel=19, n_robot_class=9)
+        model.load_state_dict(torch.load(MODEL_PATH))
+        for param in model.parameters():
+            param.requires_grad = False
+        return model 
+ 
 
     def fix_net_parameters(self, model):
         for param in model.parameters():

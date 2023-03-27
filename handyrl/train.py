@@ -189,6 +189,22 @@ def forward_prediction(model, hidden, batch, args):
     return outputs
 
 
+def compute_teacher_kl_loss(policy_logits, teacher_policy_logits, action_mask):
+    learner_policy_log_probs = F.log_softmax(policy_logits, dim=-1)
+    teacher_policy = F.softmax(teacher_policy_logits, dim=-1)
+    kl_div = F.kl_div(
+        learner_policy_log_probs,
+        teacher_policy.detach(),
+        reduction="none",
+        log_target=False
+    ).sum(dim=-1)
+
+    # 無効な行動をmaskする
+    kl_div_masked = kl_div * action_mask.float()
+    # Sum over y, x, and action_planes dimensions to combine kl divergences from different actions
+    return kl_div_masked.sum(dim=-1).sum(dim=-1).squeeze(dim=-2)
+
+
 def compose_losses(outputs, log_selected_policies, total_advantages, targets, batch, args):
     """Caluculate loss value
 
@@ -207,19 +223,25 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
         losses['v'] = ((outputs['value'] - targets['value']) ** 2).mul(omasks).sum() / 2
     if 'return' in outputs:
         losses['r'] = F.smooth_l1_loss(outputs['return'], targets['return'], reduction='none').mul(omasks).sum()
-    logits = outputs['robot_policy'].transpose(3,4).transpose(4,5)  # chを最後に持ってくる
-    entropy = dist.Categorical(logits=logits).entropy().sum(dim=(-1,-2)).mul(tmasks.sum(-1))
+    logits = outputs['robot_policy']
+    teacher_logits = outputs['teacher_robot_policy']
+    entropy = dist.Categorical(logits=logits.transpose(3,4).transpose(4,5) ).entropy().sum(dim=(-1,-2)).mul(tmasks.sum(-1))
     losses['ent'] = entropy.sum()
 
     base_loss = losses['p'] + losses.get('v', 0) + losses.get('r', 0)
     entropy_loss = entropy.mul(1 - batch['progress'] * (1 - args['entropy_regularization_decay'])).sum() * -args['entropy_regularization']
-    losses['total'] = base_loss + entropy_loss
+
+    kl_loss = compute_teacher_kl_loss(logits, teacher_logits)
+    losses['kl'] = kl_loss 
+    losses['total'] = base_loss + entropy_loss + kl_loss 
 
     return losses, dcnt
 
 
-def compute_loss(batch, model, hidden, args):
+def compute_loss(batch, model, teacher_model, hidden, args):
     outputs = forward_prediction(model, hidden, batch, args)
+    teacher_outputs = forward_prediction(teacher_model, hidden, batch, args)
+    outputs['teacher_logits'] = teacher_outputs['logits']
     if args['burn_in_steps'] > 0:
         batch = map_r(batch, lambda v: v[:, args['burn_in_steps']:] if v.size(1) > 1 else v)
         outputs = map_r(outputs, lambda v: v[:, args['burn_in_steps']:])
@@ -322,11 +344,12 @@ class Batcher:
 
 
 class Trainer:
-    def __init__(self, args, model):
+    def __init__(self, args, model, teacher_model):
         self.episodes = deque()
         self.args = args
         self.gpu = torch.cuda.device_count()
         self.model = model
+        self.teacher_model = teacher_model
         self.default_lr = 3e-8
         self.data_cnt_ema = self.args['batch_size'] * self.args['forward_steps']
         self.params = list(self.model.parameters())
@@ -338,6 +361,7 @@ class Trainer:
         self.update_queue = queue.Queue(maxsize=1)
 
         self.wrapped_model = ModelWrapper(self.model)
+        self.wrapped_teacher_model = ModelWrapper(self.teacher_model)
         self.trained_model = self.wrapped_model
         if self.gpu > 1:
             self.trained_model = nn.DataParallel(self.wrapped_model)
@@ -366,7 +390,7 @@ class Trainer:
                 batch = to_gpu(batch)
                 hidden = to_gpu(hidden)
 
-            losses, dcnt = compute_loss(batch, self.trained_model, hidden, self.args)
+            losses, dcnt = compute_loss(batch, self.trained_model, self.wrapped_teacher_model, hidden, self.args)
 
             self.optimizer.zero_grad()
             losses['total'].backward()
@@ -423,6 +447,7 @@ class Learner:
         # trained datum
         self.model_epoch = self.args['restart_epoch']
         self.model = net if net is not None else self.env.net()
+        self.teacher_model = self.env.teacher_net()
         if self.model_epoch > 0:
             self.model.load_state_dict(torch.load(self.model_path(self.model_epoch)), strict=False)
 
@@ -440,7 +465,7 @@ class Learner:
         self.worker = WorkerServer(args) if remote else WorkerCluster(args)
 
         # thread connection
-        self.trainer = Trainer(args, copy.deepcopy(self.model))
+        self.trainer = Trainer(args, copy.deepcopy(self.model), copy.deepcopy(self.teacher_model))
 
     def model_path(self, model_id):
         return os.path.join('models', str(model_id) + '.pth')
