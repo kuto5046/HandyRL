@@ -169,7 +169,15 @@ class Environment(BaseEnvironment):
 
     # Should be defined if you use immediate reward
     def reward(self):
-        return {}
+        rewards = {}
+        for player in self.players():
+            # factoryが消滅したら-1/10
+            factories_count = len(self.obs_list[-1]['player_0']['factories'][player])
+            prev_factories_count = len(self.obs_list[-2]['player_0']['factories'][player])
+            assert factories_count <= prev_factories_count
+            rewards[player] = (factories_count - prev_factories_count) / 10  # 負の報酬 win rewardsを超えないように10でわる
+        return rewards
+
 
     # Should be defined in all games
     def legal_actions(self, player):

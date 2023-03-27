@@ -212,11 +212,12 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
 
     tmasks = batch['turn_mask']
     omasks = batch['observation_mask']
+    amasks = batch['action_mask']
 
     losses = {}
     dcnt = tmasks.sum().item()
 
-    losses['p'] = (-log_selected_policies * total_advantages).mul(tmasks).sum()
+    losses['p'] = (-log_selected_policies * total_advantages).sum()
     if 'value' in outputs:
         losses['v'] = ((outputs['value'] - targets['value']) ** 2).mul(omasks).sum() / 2
     if 'return' in outputs:
@@ -229,8 +230,9 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
     base_loss = losses['p'] + losses.get('v', 0) + losses.get('r', 0)
     entropy_loss = entropy.mul(1 - batch['progress'] * (1 - args['entropy_regularization_decay'])).sum() * -args['entropy_regularization']
 
-    kl_loss = compute_teacher_kl_loss(logits, teacher_logits, batch['action_mask'])
+    kl_loss = compute_teacher_kl_loss(logits, teacher_logits, amasks)
     losses['kl'] = kl_loss 
+    losses['entropy'] = entropy_loss 
     losses['total'] = base_loss + entropy_loss + kl_loss 
 
     return losses, dcnt
@@ -247,17 +249,19 @@ def compute_loss(batch, model, teacher_model, hidden, args):
     actions = batch['action']
     emasks = batch['episode_mask']
     omasks = batch['observation_mask']
+    amasks = batch['action_mask']
+    unit_masks = (amasks.sum(dim=-3).unsqueeze(dim=3) > 0).float()
     value_target_masks, return_target_masks = omasks, omasks
 
     clip_rho_threshold, clip_c_threshold = 1.0, 1.0
 
-    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob'], 1e-16, 1))  # * emasks
-    log_selected_t_policies = F.log_softmax(outputs['robot_policy'], dim=-3).gather(-3, actions)  #* emasks
+    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob'], 1e-16, 1))  * unit_masks
+    log_selected_t_policies = F.log_softmax(outputs['robot_policy'], dim=-3).gather(-3, actions)  * unit_masks
 
     # thresholds of importance sampling
     log_rhos = log_selected_t_policies.detach() - log_selected_b_policies
     rhos = torch.exp(log_rhos) # .sum(dim=(4,5))
-    clipped_rhos = torch.clamp(rhos, 0, clip_rho_threshold)
+    clipped_rhos = torch.clamp(rhos, 0, clip_rho_threshold).sum(dim=-1).sum(dim=-1)
     cs = torch.clamp(rhos, 0, clip_c_threshold)
     outputs_nograd = {k: o.detach() for k, o in outputs.items()}
 
@@ -285,7 +289,7 @@ def compute_loss(batch, model, teacher_model, hidden, args):
         _, advantages['return'] = compute_target(args['policy_target'], *return_args)
 
     # compute policy advantage
-    total_advantages = clipped_rhos * sum(advantages.values()).unsqueeze(-1).unsqueeze(-1)
+    total_advantages = (clipped_rhos * sum(advantages.values())).unsqueeze(dim=-1).unsqueeze(dim=-1)
 
     return compose_losses(outputs, log_selected_t_policies, total_advantages, targets, batch, args)
 
