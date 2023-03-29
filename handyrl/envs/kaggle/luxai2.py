@@ -42,7 +42,7 @@ class Environment(BaseEnvironment):
         self.reset()
 
 
-    def init_env_cfg(self, zero_queue_cost=True):
+    def init_env_cfg(self, zero_queue_cost):
         """Falseにしたい場合resetの後に手動実行する"""
         env_cfg = EnvConfig()
         if zero_queue_cost:
@@ -51,11 +51,11 @@ class Environment(BaseEnvironment):
         self.env.env_cfg = env_cfg
         self.env.state.env_cfg = env_cfg 
 
-    def reset(self, args={}):
+    def reset(self, args={}, zero_queue_cost=True):
         """ 
         envをresetしてupdate
         """
-        self.init_env_cfg()
+        self.init_env_cfg(zero_queue_cost)
         obs = self.env.reset()
         self.update((obs, {}, {'player_0':False, 'player_1': False}, {}), True)        
 
@@ -94,7 +94,7 @@ class Environment(BaseEnvironment):
 
 
     def terminal(self):
-        # if self.env.state.env_steps > 50: # debug
+        # if self.env.state.env_steps > 150: # debug
         #     return True 
         return self.done
 

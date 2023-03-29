@@ -260,8 +260,8 @@ def compute_loss(batch, model, teacher_model, hidden, args):
 
     # thresholds of importance sampling
     log_rhos = log_selected_t_policies.detach() - log_selected_b_policies
-    rhos = torch.exp(log_rhos) # .sum(dim=(4,5))
-    clipped_rhos = torch.clamp(rhos, 0, clip_rho_threshold).sum(dim=-1).sum(dim=-1)
+    rhos = torch.exp(log_rhos).sum(dim=-1).sum(dim=-1)
+    clipped_rhos = torch.clamp(rhos, 0, clip_rho_threshold)
     cs = torch.clamp(rhos, 0, clip_c_threshold)
     outputs_nograd = {k: o.detach() for k, o in outputs.items()}
 
@@ -546,8 +546,8 @@ class Learner:
                 name_tag = ' (%s)' % name if name != '' else ''
                 mean_ep_len = total_ep_len / n
                 logger.info('win rate%s = %.3f (%.1f / %d)' % (name_tag, (mean + 1) / 2, (r + n) / 2, n))
-                wandb.log({'evaluate/win_rate':(mean + 1) / 2})
-                wandb.log({'evaluate/mean_episode_length': mean_ep_len})
+                wandb.log({f'evaluate/win_rate-{name}':(mean + 1) / 2})
+                wandb.log({f'evaluate/mean_episode_length-{name}': mean_ep_len})
 
             keys = self.results_per_opponent[self.model_epoch]
             if len(self.args.get('eval', {}).get('opponent', [])) <= 1 and len(keys) <= 1:

@@ -81,7 +81,7 @@ class NetworkAgent:
 
 def exec_match(env, agents, critic=None, show=False, game_args={}):
     ''' match with shared game environment '''
-    if env.reset(game_args):
+    if env.reset(game_args, zero_queue_cost=False):
         return None
     for agent in agents.values():
         agent.reset(env, show=show)
