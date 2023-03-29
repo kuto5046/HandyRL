@@ -231,7 +231,7 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
     entropy_loss = entropy.mul(1 - batch['progress'] * (1 - args['entropy_regularization_decay'])).sum() * -args['entropy_regularization']
 
     kl_loss = compute_teacher_kl_loss(logits, teacher_logits, amasks)
-    losses['kl'] = kl_loss 
+    losses['kl'] = kl_loss * 0.04
     losses['entropy'] = entropy_loss 
     losses['total'] = base_loss + entropy_loss + kl_loss 
 
