@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import sys
 # You need to install kaggle_environments, requests
 from kaggle_environments import make
 
@@ -187,3 +187,10 @@ class Environment(BaseEnvironment):
         game_state = self.get_game_state(player)
         robot_legal_actions = get_valid_robot_policy_map(game_state, player)
         return robot_legal_actions
+
+    def __str__(self):
+        # 状況を可視化するもの
+        target_player = 'player_1'
+        print(f'step:{self.env.state.real_env_steps}', file=sys.stderr)
+        print(f'factories: {self.env.state.factories[target_player].keys()}', file=sys.stderr)
+        print(f'units: {self.env.state.units[target_player].keys()}', file=sys.stderr)

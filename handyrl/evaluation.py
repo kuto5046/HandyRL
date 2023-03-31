@@ -2,7 +2,7 @@
 # Licensed under The MIT License [see LICENSE for details]
 
 # evaluation of policies or planning algorithms
-
+import sys 
 import random
 import time
 import multiprocessing as mp
@@ -81,7 +81,7 @@ class NetworkAgent:
 
 def exec_match(env, agents, critic=None, show=False, game_args={}):
     ''' match with shared game environment '''
-    if env.reset(game_args, zero_queue_cost=False):
+    if env.reset(game_args):
         return None
     for agent in agents.values():
         agent.reset(env, show=show)

@@ -233,7 +233,7 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
     kl_loss = compute_teacher_kl_loss(logits, teacher_logits, amasks)
     losses['kl'] = kl_loss * args['kl_cost']
     losses['entropy'] = entropy_loss 
-    losses['total'] = base_loss + entropy_loss + kl_loss 
+    losses['total'] = base_loss + entropy_loss + losses['kl']
 
     return losses, dcnt
 
