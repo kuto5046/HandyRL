@@ -255,9 +255,42 @@ def compute_loss(batch, model, teacher_model, hidden, args):
 
     clip_rho_threshold, clip_c_threshold = 1.0, 1.0
 
+    def get_log_probs(selected_probs):
+        # Convert the probs to conditional probs, since we sample without replacement
+        remaining_probability_density = 1. - torch.cat([
+            torch.zeros(
+                (*selected_probs.shape[:-1], 1),
+                device=selected_probs.device,
+                dtype=selected_probs.dtype
+            ),
+            selected_probs[..., :-1].cumsum(dim=-1)
+        ], dim=-1)
+        # Avoid division by zero
+        remaining_probability_density = remaining_probability_density + torch.where(
+            remaining_probability_density == 0,
+            torch.ones_like(remaining_probability_density),
+            torch.zeros_like(remaining_probability_density)
+        )
+        conditional_selected_probs = selected_probs / remaining_probability_density
+        # Remove 0-valued conditional_selected_probs in order to eliminate neg-inf valued log_probs
+        conditional_selected_probs = conditional_selected_probs + torch.where(
+            conditional_selected_probs == 0,
+            torch.ones_like(conditional_selected_probs),
+            torch.zeros_like(conditional_selected_probs)
+        )
+        log_probs = torch.log(conditional_selected_probs)
+        # Sum over actions, y and x dimensions to combine log_probs from different actions
+        # Squeeze out action_planes dimension as well
+        return torch.flatten(log_probs, start_dim=-3, end_dim=-2).sum(dim=-2)
+    
+
     # prob=0でlogとるとinfになるのでそれを防ぐために0の箇所はepsに置換してlogをとる
-    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob']*unit_masks, 1e-16, 1)).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
-    log_selected_t_policies = torch.log(torch.clamp(F.softmax(outputs['robot_policy'], dim=-3) * unit_masks, 1e-16, 1)).gather(-3, actions).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
+    # log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob']*unit_masks, 1e-16, 1)).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
+    # log_selected_t_policies = torch.log(torch.clamp(F.softmax(outputs['robot_policy'], dim=-3) * unit_masks, 1e-16, 1)).gather(-3, actions).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
+    b_selected_probs = (batch['selected_prob']*unit_masks).transpose(3,4).transpose(4,5)
+    log_selected_b_policies = get_log_probs(b_selected_probs)
+    t_selected_probs = (F.softmax(outputs['robot_policy'], dim=-3) * unit_masks).gather(-3, actions).transpose(3,4).transpose(4,5)
+    log_selected_t_policies = get_log_probs(t_selected_probs)
 
     # thresholds of importance sampling
     log_rhos = log_selected_t_policies.detach() - log_selected_b_policies
@@ -290,7 +323,7 @@ def compute_loss(batch, model, teacher_model, hidden, args):
         _, advantages['return'] = compute_target(args['policy_target'], *return_args)
 
     # compute policy advantage
-    total_advantages = (clipped_rhos * sum(advantages.values())).unsqueeze(dim=-1).unsqueeze(dim=-1)
+    total_advantages = (clipped_rhos * sum(advantages.values()))
 
     return compose_losses(outputs, log_selected_t_policies, total_advantages, targets, batch, args)
 
