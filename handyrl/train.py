@@ -255,13 +255,12 @@ def compute_loss(batch, model, teacher_model, hidden, args):
 
     clip_rho_threshold, clip_c_threshold = 1.0, 1.0
 
-    # prob=0でlogとるとinfになるのでそれを防ぐために0の箇所はepsに置換してlogをとる
-    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob']*unit_masks, 1e-16, 1)).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
-    log_selected_t_policies = torch.log(torch.clamp(F.softmax(outputs['robot_policy'], dim=-3) * unit_masks, 1e-16, 1)).gather(-3, actions).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
+    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob'], 1e-16, 1))  * unit_masks
+    log_selected_t_policies = F.log_softmax(outputs['robot_policy'], dim=-3).gather(-3, actions)  * unit_masks
 
     # thresholds of importance sampling
     log_rhos = log_selected_t_policies.detach() - log_selected_b_policies
-    rhos = torch.exp(log_rhos)
+    rhos = torch.exp(log_rhos).sum(dim=-1).sum(dim=-1)
     clipped_rhos = torch.clamp(rhos, 0, clip_rho_threshold)
     cs = torch.clamp(rhos, 0, clip_c_threshold)
     outputs_nograd = {k: o.detach() for k, o in outputs.items()}

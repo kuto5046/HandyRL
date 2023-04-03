@@ -94,8 +94,8 @@ class Environment(BaseEnvironment):
 
 
     def terminal(self):
-        if self.env.state.env_steps > 150: # debug
-            return True 
+        # if self.env.state.env_steps > 150: # debug
+        #     return True 
         return self.done
 
 
