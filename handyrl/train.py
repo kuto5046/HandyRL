@@ -217,7 +217,7 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
     losses = {}
     dcnt = tmasks.sum().item()
 
-    losses['p'] = (-log_selected_policies * total_advantages).mul(tmasks).sum()
+    losses['p'] = (-log_selected_policies * total_advantages).sum()
     if 'value' in outputs:
         losses['v'] = ((outputs['value'] - targets['value']) ** 2).mul(omasks).sum() / 2
     if 'return' in outputs:
@@ -257,22 +257,21 @@ def compute_loss(batch, model, teacher_model, hidden, args):
 
     def get_log_probs(selected_probs):
         # Convert the probs to conditional probs, since we sample without replacement
-        # remaining_probability_density = 1. - torch.cat([
-        #     torch.zeros(
-        #         (*selected_probs.shape[:-1], 1),
-        #         device=selected_probs.device,
-        #         dtype=selected_probs.dtype
-        #     ),
-        #     selected_probs[..., :-1].cumsum(dim=-1)
-        # ], dim=-1)
-        # # Avoid division by zero
-        # remaining_probability_density = remaining_probability_density + torch.where(
-        #     remaining_probability_density == 0,
-        #     torch.ones_like(remaining_probability_density),
-        #     torch.zeros_like(remaining_probability_density)
-        # )
-        # conditional_selected_probs = selected_probs / remaining_probability_density
-        conditional_selected_probs = selected_probs
+        remaining_probability_density = 1. - torch.cat([
+            torch.zeros(
+                (*selected_probs.shape[:-1], 1),
+                device=selected_probs.device,
+                dtype=selected_probs.dtype
+            ),
+            selected_probs[..., :-1].cumsum(dim=-1)
+        ], dim=-1)
+        # Avoid division by zero
+        remaining_probability_density = remaining_probability_density + torch.where(
+            remaining_probability_density == 0,
+            torch.ones_like(remaining_probability_density),
+            torch.zeros_like(remaining_probability_density)
+        )
+        conditional_selected_probs = selected_probs / remaining_probability_density
         # Remove 0-valued conditional_selected_probs in order to eliminate neg-inf valued log_probs
         conditional_selected_probs = conditional_selected_probs + torch.where(
             conditional_selected_probs == 0,
@@ -286,13 +285,12 @@ def compute_loss(batch, model, teacher_model, hidden, args):
     
 
     # prob=0でlogとるとinfになるのでそれを防ぐために0の箇所はepsに置換してlogをとる
-    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob']*unit_masks, 1e-16, 1)).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
-    log_selected_t_policies = torch.log(torch.clamp(F.softmax(outputs['robot_policy'], dim=-3) * unit_masks, 1e-16, 1)).gather(-3, actions).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
-
-    # b_selected_probs = (batch['selected_prob']*unit_masks).transpose(3,4).transpose(4,5)
-    # log_selected_b_policies = get_log_probs(b_selected_probs)
-    # t_selected_probs = (F.softmax(outputs['robot_policy'], dim=-3) * unit_masks).gather(-3, actions).transpose(3,4).transpose(4,5)
-    # log_selected_t_policies = get_log_probs(t_selected_probs)
+    # log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob']*unit_masks, 1e-16, 1)).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
+    # log_selected_t_policies = torch.log(torch.clamp(F.softmax(outputs['robot_policy'], dim=-3) * unit_masks, 1e-16, 1)).gather(-3, actions).sum(dim=-1).sum(dim=-1)  # x,yをつぶす
+    b_selected_probs = (batch['selected_prob']*unit_masks).transpose(3,4).transpose(4,5)
+    log_selected_b_policies = get_log_probs(b_selected_probs)
+    t_selected_probs = (F.softmax(outputs['robot_policy'], dim=-3) * unit_masks).gather(-3, actions).transpose(3,4).transpose(4,5)
+    log_selected_t_policies = get_log_probs(t_selected_probs)
 
     # thresholds of importance sampling
     log_rhos = log_selected_t_policies.detach() - log_selected_b_policies
