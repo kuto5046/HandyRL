@@ -190,8 +190,8 @@ def forward_prediction(model, hidden, batch, args):
 
 
 def compute_teacher_kl_loss(policy_logits, teacher_policy_logits, action_mask):
-    learner_policy_log_probs = F.log_softmax(policy_logits * action_mask.float(), dim=-3)
-    teacher_policy = F.softmax(teacher_policy_logits * action_mask.float(), dim=-3)
+    learner_policy_log_probs = F.log_softmax(policy_logits, dim=-3) * action_mask.float()
+    teacher_policy = F.softmax(teacher_policy_logits, dim=-3) * action_mask.float()
     kl_div = F.kl_div(
         learner_policy_log_probs,
         teacher_policy.detach(),
@@ -255,12 +255,12 @@ def compute_loss(batch, model, teacher_model, hidden, args):
 
     clip_rho_threshold, clip_c_threshold = 1.0, 1.0
 
-    log_selected_b_policies = torch.log(torch.clamp(batch['selected_prob'], 1e-16, 1))  * unit_masks
-    log_selected_t_policies = F.log_softmax(outputs['robot_policy'], dim=-3).gather(-3, actions)  * unit_masks
+    log_selected_b_policies = (torch.log(torch.clamp(batch['selected_prob'], 1e-16, 1))  * unit_masks).sum(dim=-1).sum(dim=-1)
+    log_selected_t_policies = (F.log_softmax(outputs['robot_policy'], dim=-3).gather(-3, actions) * unit_masks).sum(dim=-1).sum(dim=-1)
 
     # thresholds of importance sampling
     log_rhos = log_selected_t_policies.detach() - log_selected_b_policies
-    rhos = torch.exp(log_rhos).sum(dim=-1).sum(dim=-1)
+    rhos = torch.exp(log_rhos)
     clipped_rhos = torch.clamp(rhos, 0, clip_rho_threshold)
     cs = torch.clamp(rhos, 0, clip_c_threshold)
     outputs_nograd = {k: o.detach() for k, o in outputs.items()}
@@ -289,7 +289,7 @@ def compute_loss(batch, model, teacher_model, hidden, args):
         _, advantages['return'] = compute_target(args['policy_target'], *return_args)
 
     # compute policy advantage
-    total_advantages = (clipped_rhos * sum(advantages.values())).unsqueeze(dim=-1).unsqueeze(dim=-1)
+    total_advantages = clipped_rhos * sum(advantages.values())
 
     return compose_losses(outputs, log_selected_t_policies, total_advantages, targets, batch, args)
 
