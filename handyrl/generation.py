@@ -8,8 +8,10 @@ import bz2
 import pickle
 
 import numpy as np
-
+import time 
 from .util import softmax
+from exp.exp031.agent import get_factory_actions, get_robot_actions
+from exp.exp031.src.observation import robot_action_to_label
 
 
 class Generator:
@@ -34,6 +36,7 @@ class Generator:
 
             turn_players = self.env.turns()
             observers = self.env.observers()
+            output_actions = {}
             for player in self.env.players():
                 if player not in turn_players + observers:
                     continue
@@ -42,26 +45,52 @@ class Generator:
 
                 obs = self.env.observation(player)
                 model = models[player]
+                # start_time = time.time()
                 outputs = model.inference(obs, hidden[player])
+                # print(f'{time.time()-start_time:.4f}s')
                 hidden[player] = outputs.get('hidden', None)
                 v = outputs.get('value', None)
 
                 moment['observation'][player] = obs
                 moment['value'][player] = v
 
+                # step = self.env.env.state.env_steps
                 if player in turn_players:
-                    p_ = outputs['policy']
-                    legal_actions = self.env.legal_actions(player)
-                    action_mask = np.ones_like(p_) * 1e32
-                    action_mask[legal_actions] = 0
-                    p = softmax(p_ - action_mask)
-                    action = random.choices(legal_actions, weights=p[legal_actions])[0]
+                    # _obs = self.env.obs_list[-1][player]
+                    assert self.env.env.state.real_env_steps >= 0
+                    actions = dict()
+                    game_state = self.env.get_game_state(player)
 
-                    moment['selected_prob'][player] = p[action]
-                    moment['action_mask'][player] = action_mask
-                    moment['action'][player] = action
+                    # greedyでなくサンプリングにしたほうがいいかも
+                    actions = get_factory_actions(game_state, player, actions)
+                    actions = get_robot_actions(game_state, outputs['robot_policy'], player, actions)
+                    output_actions[player] = actions
 
-            err = self.env.step(moment['action'])
+                    units = game_state.units[player]
+                    map_size = self.env.env.env_cfg.map_size
+                    selected_prob_map = np.zeros((map_size, map_size), dtype=np.float32)
+                    # 有効な行動の場合1となっている
+                    action_mask_map = self.env.legal_actions(player)
+                    action_map = np.zeros((map_size, map_size), dtype=np.float32)
+                    for unit_id, action in sorted(actions.items()):
+                        if 'unit' not in unit_id:
+                            continue 
+
+                        label = robot_action_to_label(action[0])
+                        x, y = units[unit_id].pos
+                        p_ = outputs['robot_policy'][:, x,y]
+                        action_mask = np.ones_like(p_) * 1e32
+                        legal_actions = np.where(action_mask_map[:, x, y] == 1)[0]
+                        action_mask[legal_actions] = 0
+                        p = softmax(p_ - action_mask)
+                        selected_prob_map[x, y] = p[label]
+                        action_map[x,y] = label
+
+                    moment['selected_prob'][player] = selected_prob_map
+                    moment['action_mask'][player] = action_mask_map
+                    moment['action'][player] = action_map
+
+            err = self.env.step(output_actions)
             if err:
                 return None
 
