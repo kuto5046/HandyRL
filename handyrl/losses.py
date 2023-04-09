@@ -29,7 +29,7 @@ def temporal_difference(values, returns, rewards, lambda_, gamma):
     return target_values, target_values - values
 
 
-def upgo(values, returns, rewards, lambda_, gamma):
+def upgo(values, returns, rewards, lambda_, gamma, rhos):
     target_values = deque([returns[:, -1]])
     for i in range(values.size(1) - 2, -1, -1):
         value = values[:, i + 1]
@@ -39,7 +39,7 @@ def upgo(values, returns, rewards, lambda_, gamma):
 
     target_values = torch.stack(tuple(target_values), dim=1)
 
-    return target_values, target_values - values
+    return target_values, (target_values - values) * rhos
 
 
 def vtrace(values, returns, rewards, lambda_, gamma, rhos, cs):
@@ -73,7 +73,7 @@ def compute_target(algorithm, values, returns, rewards, lmb, gamma, rhos, cs, ma
     if algorithm == 'TD':
         return temporal_difference(values, returns, rewards, lambda_, gamma)
     elif algorithm == 'UPGO':
-        return upgo(values, returns, rewards, lambda_, gamma)
+        return upgo(values, returns, rewards, lambda_, gamma, rhos)
     elif algorithm == 'VTRACE':
         return vtrace(values, returns, rewards, lambda_, gamma, rhos, cs)
     else:

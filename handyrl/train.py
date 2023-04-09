@@ -218,8 +218,9 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
 
     losses = {}
     dcnt = tmasks.sum().item()
-
-    losses['p'] = (-log_selected_policies * total_advantages).sum()
+    for key in total_advantages.keys():
+        losses[f'p_{key}'] = (-log_selected_policies * total_advantages[key]).sum()
+    losses['p'] = torch.stack([loss for loss_name, loss in losses.items() if 'p_' in loss_name]).sum()
     if 'value' in outputs:
         losses['v'] = ((outputs['value'] - targets['value']) ** 2).mul(omasks).sum() / 2
     if 'return' in outputs:
@@ -286,12 +287,14 @@ def compute_loss(batch, model, teacher_model, hidden, args):
     targets['value'], advantages['value'] = compute_target(args['value_target'], *value_args)
     targets['return'], advantages['return'] = compute_target(args['value_target'], *return_args)
 
-    if args['policy_target'] != args['value_target']:
-        _, advantages['value'] = compute_target(args['policy_target'], *value_args)
-        _, advantages['return'] = compute_target(args['policy_target'], *return_args)
+    total_advantages = {}
+    for policy_target in args['policy_targets']:
+        if policy_target != args['value_target']:
+            _, advantages['value'] = compute_target(policy_target, *value_args)
+            _, advantages['return'] = compute_target(policy_target, *return_args)
 
-    # compute policy advantage
-    total_advantages = clipped_rhos * sum(advantages.values())
+        # compute policy advantage
+        total_advantages[policy_target] = clipped_rhos * sum(advantages.values())
 
     return compose_losses(outputs, log_selected_t_policies, total_advantages, targets, batch, args)
 
