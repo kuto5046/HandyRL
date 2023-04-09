@@ -22,13 +22,13 @@ from ...environment import BaseEnvironment
 # sys.append('/home/user/work/lux')
 from lux.kit import obs_to_game_state, GameState, EnvConfig
 from luxai_s2 import LuxAI_S2
-from exp.exp031.src.observation import make_input
-from exp.exp031.src.early_step_policy import _early_setup
-from exp.exp031.src.unet import LuxUNetModel
-from exp.exp031.src.validation import get_valid_robot_policy_map
+from exp.exp036.src.observation import make_input, get_team_lichen_map
+from exp.exp036.src.early_step_policy import _early_setup
+from exp.exp036.src.unet import LuxUNetModel
+from exp.exp036.src.validation import get_valid_robot_policy_map
 
-MODEL_PATH = '/home/user/work/exp/exp031/models/best_robot_model.pth'
-TEACHER_MODEL_PATH = '/home/user/work/exp/exp031/models/best_robot_model.pth'
+MODEL_PATH = '/home/user/work/exp/exp036/models/best_all_model.pth'
+TEACHER_MODEL_PATH = '/home/user/work/exp/exp036/models/best_all_model.pth'
 
 seed = 2022
 
@@ -123,15 +123,15 @@ class Environment(BaseEnvironment):
         return int(player[-1])
     
     def net(self):
-        model = LuxUNetModel(n_channel=19, n_robot_class=9)
+        model = LuxUNetModel(n_channel=19, n_robot_class=10, n_factory_class=4)
         model.load_state_dict(torch.load(MODEL_PATH))
         model = self.fix_net_parameters(model)
         return model 
 
 
     def teacher_net(self):
-        model = LuxUNetModel(n_channel=19, n_robot_class=9)
-        model.load_state_dict(torch.load(MODEL_PATH))
+        model = LuxUNetModel(n_channel=19, n_robot_class=10, n_factory_class=4)
+        model.load_state_dict(torch.load(TEACHER_MODEL_PATH))
         for param in model.parameters():
             param.requires_grad = False
         return model 
@@ -142,7 +142,7 @@ class Environment(BaseEnvironment):
             param.requires_grad = False
         layers = list(model.children())
         value_layer = layers[-1]
-        policy_layer = layers[-3]
+        policy_layer = layers[-4]
         print(f'train only following layer: \n{policy_layer} \n{value_layer}')
         for param in value_layer.parameters():
             param.requires_grad = True
@@ -188,9 +188,23 @@ class Environment(BaseEnvironment):
         robot_legal_actions = get_valid_robot_policy_map(game_state, player)
         return robot_legal_actions
 
+
+    def get_info(self, player):
+        n_factories0 = len(self.env.state.factories['player_0'].keys())
+        n_units0 = len(self.env.state.units['player_0'].keys())
+        n_lichen0 = get_team_lichen_map(
+            self.env.state.board.lichen,
+            self.env.state.board.lichen_strains,
+            self.env.state.teams['player_0'].factory_strains
+        ).sum()
+        power = sum([f.power for f in self.env.state.factories[player].values()]) + sum([u.power for u in self.env.state.units[player].values()])
+        ice = sum([f.cargo.ice for f in self.env.state.factories[player].values()]) + sum([u.cargo.ice for u in self.env.state.units[player].values()])
+        water = sum([f.cargo.water for f in self.env.state.factories[player].values()]) + sum([u.cargo.water for u in self.env.state.units[player].values()])
+        return f"[{player}] factories:{n_factories0} units:{n_units0} lichen:{n_lichen0} power:{power} ice:{ice}, water:{water}"
+
+
     def __str__(self):
         # 状況を可視化するもの
-        target_player = 'player_1'
-        print(f'step:{self.env.state.real_env_steps}', file=sys.stderr)
-        print(f'factories: {self.env.state.factories[target_player].keys()}', file=sys.stderr)
-        print(f'units: {self.env.state.units[target_player].keys()}', file=sys.stderr)
+        player0_info = self.get_info('player_0')
+        player1_info = self.get_info('player_1')
+        return f'step:{self.env.state.real_env_steps} {player0_info} {player1_info}'

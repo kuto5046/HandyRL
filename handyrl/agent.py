@@ -8,7 +8,7 @@ import random
 import numpy as np
 
 from .util import softmax
-from exp.exp031.agent import get_factory_actions, get_robot_actions
+from exp.exp036.agent import get_factory_actions, get_robot_actions
 from lux.kit import EnvConfig
 env_cfg = EnvConfig()
 
@@ -74,7 +74,7 @@ class Agent:
         outputs = self.plan(obs)
         actions = dict()
         game_state = env.get_game_state(player)
-        actions = get_factory_actions(game_state, player, actions)
+        actions = get_factory_actions(game_state, outputs['factory_policy'], player, actions)
         actions = get_robot_actions(game_state, outputs['robot_policy'], player, actions)
         return actions 
 

@@ -10,8 +10,8 @@ import pickle
 import numpy as np
 import time 
 from .util import softmax
-from exp.exp031.agent import get_factory_actions, get_robot_actions
-from exp.exp031.src.observation import robot_action_to_label
+from exp.exp036.agent import get_factory_actions, get_robot_actions
+from exp.exp036.src.observation import robot_action_to_label
 
 
 class Generator:
@@ -62,7 +62,7 @@ class Generator:
                     game_state = self.env.get_game_state(player)
 
                     # greedyでなくサンプリングにしたほうがいいかも
-                    actions = get_factory_actions(game_state, player, actions)
+                    actions = get_factory_actions(game_state, outputs['factory_policy'], player, actions)
                     actions = get_robot_actions(game_state, outputs['robot_policy'], player, actions)
                     output_actions[player] = actions
 
@@ -86,6 +86,7 @@ class Generator:
                         selected_prob_map[x, y] = p[label]
                         action_map[x,y] = label
 
+                    # 有効な行動が1になっている。それ以外を1e32にして1を0にする
                     moment['selected_prob'][player] = selected_prob_map
                     moment['action_mask'][player] = action_mask_map
                     moment['action'][player] = action_map

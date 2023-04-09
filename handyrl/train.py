@@ -177,11 +177,13 @@ def forward_prediction(model, hidden, batch, args):
         outputs = {k: torch.stack(o, dim=1) for k, o in outputs.items() if o[0] is not None}
 
     for k, o in outputs.items():
-        if 'policy' in k:
+        if 'factory_policy' == k:
+            continue 
+        elif 'robot_policy' == k:
             # o = o.mul(batch['turn_mask'])
             if o.size(2) > 1 and batch_shape[2] == 1:  # turn-alternating batch
                 o = o.sum(2, keepdim=True)  # gather turn player's policies
-            outputs[k] = o - batch['action_mask']
+            outputs[k] = o - torch.where(batch['action_mask'] == 1, 0, 1e32)
         else:
             # mask valid target values and cumulative rewards
             outputs[k] = o.mul(batch['observation_mask'])

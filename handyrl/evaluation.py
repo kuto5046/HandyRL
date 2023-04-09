@@ -86,6 +86,7 @@ def exec_match(env, agents, critic=None, show=False, game_args={}):
     for agent in agents.values():
         agent.reset(env, show=show)
     while not env.terminal():
+        # print(env)
         if show:
             view(env)
         if show and critic is not None:
