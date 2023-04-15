@@ -22,13 +22,13 @@ from ...environment import BaseEnvironment
 # sys.append('/home/user/work/lux')
 from lux.kit import obs_to_game_state, GameState, EnvConfig
 from luxai_s2 import LuxAI_S2
-from exp.exp036.src.observation import make_input, get_team_lichen_map
-from exp.exp036.src.early_step_policy import _early_setup
-from exp.exp036.src.unet import LuxUNetModel
-from exp.exp036.src.validation import get_valid_robot_policy_map
+from exp.exp042.src.observation import make_input, get_team_lichen_map
+from exp.exp042.src.early_step_policy import _early_setup
+from exp.exp042.src.unet import LuxUNetModel
+from exp.exp042.src.validation import get_valid_robot_policy_map
 
-MODEL_PATH = '/home/user/work/exp/exp036/models/best_all_model.pth'
-TEACHER_MODEL_PATH = '/home/user/work/exp/exp036/models/best_all_model.pth'
+MODEL_PATH = '/home/user/work/exp/exp042/models/best_all_model100.pth'
+TEACHER_MODEL_PATH = '/home/user/work/exp/exp042/models/best_all_model100.pth'
 
 seed = 2022
 

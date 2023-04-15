@@ -8,7 +8,7 @@ import random
 import numpy as np
 
 from .util import softmax
-from exp.exp036.agent import get_factory_actions, get_robot_actions
+from exp.exp042.agent import get_factory_actions, get_robot_actions
 from lux.kit import EnvConfig
 env_cfg = EnvConfig()
 

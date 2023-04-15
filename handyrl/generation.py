@@ -10,8 +10,8 @@ import pickle
 import numpy as np
 import time 
 from .util import softmax
-from exp.exp036.agent import get_factory_actions, get_robot_actions
-from exp.exp036.src.observation import robot_action_to_label
+from exp.exp042.agent import get_factory_actions, get_robot_actions
+from exp.exp042.src.observation import robot_action_to_label
 
 
 class Generator:
