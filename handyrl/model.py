@@ -50,8 +50,8 @@ class ModelWrapper(nn.Module):
         args[1]: prev_state
         """
         obses = args[0]
-        state, prev_state = obses
-        outputs = self.model.forward(state, prev_state, **kwargs)
+        state = obses
+        outputs = self.model.forward(state, **kwargs)
         outputs['value'] = outputs['value'].tanh()
         return outputs 
 
@@ -79,12 +79,11 @@ import onnxruntime as ort
 def convert_onnx_model(model):
     model.eval()
     model.cpu()
-    state = torch.zeros((1,19,48,48))
-    prev_state = state.clone()
-    args = (state, prev_state)
+    state = torch.zeros((1,1,17,48,48))
+    args = state
     # file_path = f"tmp.onnx"
-    input_names = ["state", "prev_state"]
-    output_names = ['robot_policy', 'value']
+    input_names = ["state"]
+    output_names = ['output']
     # torch.onnx.export(model=model, args=args, f=file_path, input_names=input_names, output_names=output_names, opset_version=11)
     # onnx_model = ort.InferenceSession(file_path)
     onnx_io = io.BytesIO()
@@ -113,17 +112,14 @@ class OnnxModelWrapper(nn.Module):
         args[0]: state
         args[1]: prev_state
         """
-        obses = args[0]
-        state, prev_state = obses
-        policy, value = self.model.run(None, {'state': state.numpy(), 'prev_state': prev_state.numpy()})
-        return policy, value.tanh()
+        state = args[0]
+        return self.model.run(None, {'state': state.detach().cpu().numpy()})
 
     def inference(self, _x, hidden, **kwargs):
         xt = map_r(_x, lambda x: torch.from_numpy(np.array(x)).contiguous().unsqueeze(0) if x is not None else None)
         ht = map_r(hidden, lambda h: torch.from_numpy(np.array(h)).contiguous().unsqueeze(0) if h is not None else None)    
-        policy, value = self.forward(xt, ht, **kwargs)
-        return {'robot_policy':policy.squeeze(0), 'value':value.squeeze(0)}
-        # return map_r(outputs, lambda o: o.squeeze(0) if o is not None else None)
+        robot_policy, factory_policy, value = self.forward(xt, ht, **kwargs)
+        return {'robot_policy':robot_policy.squeeze(0), 'factory_policy':factory_policy.squeeze(0), 'value':value.squeeze(0)}
 
 
 

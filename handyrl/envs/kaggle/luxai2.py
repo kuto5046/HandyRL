@@ -22,13 +22,14 @@ from ...environment import BaseEnvironment
 # sys.append('/home/user/work/lux')
 from lux.kit import obs_to_game_state, GameState, EnvConfig
 from luxai_s2 import LuxAI_S2
-from exp.exp042.src.observation import make_input, get_team_lichen_map
-from exp.exp042.src.early_step_policy import _early_setup
-from exp.exp042.src.unet import LuxUNetModel
-from exp.exp042.src.validation import get_valid_robot_policy_map
+from collections import deque 
+from exp.exp044.src.observation import make_input, get_team_lichen_map
+from exp.exp044.src.early_step_policy import _early_setup
+from exp.exp044.src.unet import LuxUNetModel
+from exp.exp044.src.validation import get_valid_robot_policy_map
 
-MODEL_PATH = '/home/user/work/exp/exp042/models/best_all_model100.pth'
-TEACHER_MODEL_PATH = '/home/user/work/exp/exp042/models/best_all_model100.pth'
+MODEL_PATH = '/home/user/work/exp/exp044/models/best_all_model.pth'
+TEACHER_MODEL_PATH = '/home/user/work/exp/exp044/models/best_all_model.pth'
 
 seed = 2022
 
@@ -40,6 +41,7 @@ class Environment(BaseEnvironment):
         """
         self.env = LuxAI_S2()
         self.reset()
+        self.n_stack = 1
 
 
     def init_env_cfg(self, zero_queue_cost):
@@ -76,14 +78,21 @@ class Environment(BaseEnvironment):
 
     def update(self, info, reset):
         obs, rewards, dones, last_actions = info
-        
+
         if reset:
-            self.obs_list = []
-            self.reward_list = []
+            self.obs_list = deque(maxlen=4)
+            self.reward_list = deque(maxlen=4)
         self.obs_list.append(obs)
         self.last_actions = last_actions # ここはreturnした全ての行動をdictで持つ
         self.done = dones["player_0"] and dones["player_1"]
         self.reward_list.append(rewards)
+
+        p = random.random()
+        # 1/4 action queue cost
+        if p < 0.25:
+            self.init_env_cfg(zero_queue_cost=False)
+        else:
+            self.init_env_cfg(zero_queue_cost=True)
         # self.config_update()
 
 
@@ -123,14 +132,14 @@ class Environment(BaseEnvironment):
         return int(player[-1])
     
     def net(self):
-        model = LuxUNetModel(n_channel=19, n_robot_class=10, n_factory_class=4)
+        model = LuxUNetModel(n_channel=17, n_robot_class=10, n_factory_class=4, n_stack=self.n_stack)
         model.load_state_dict(torch.load(MODEL_PATH))
         model = self.fix_net_parameters(model)
         return model 
 
 
     def teacher_net(self):
-        model = LuxUNetModel(n_channel=19, n_robot_class=10, n_factory_class=4)
+        model = LuxUNetModel(n_channel=17, n_robot_class=10, n_factory_class=4, n_stack=self.n_stack)
         model.load_state_dict(torch.load(TEACHER_MODEL_PATH))
         for param in model.parameters():
             param.requires_grad = False
@@ -152,14 +161,11 @@ class Environment(BaseEnvironment):
 
     def observation(self, player=None):
         own_team = self.player_idx(player)
-        obs = self.obs_list[-1][player]
-        state = make_input(obs, obs['real_env_steps'], own_team)
-        if len(self.obs_list) >= 2:
-            prev_obs = self.obs_list[-2][player]
-            prev_state = make_input(prev_obs, prev_obs['real_env_steps'], own_team)
-        else:
-            prev_state = state.copy()
-        return (state, prev_state)
+        obses = [obs[player] for obs in list(self.obs_list)[-self.n_stack:]]
+        assert len(obses)==self.n_stack
+        real_env_steps = obses[-1]['real_env_steps']
+        state = np.stack([make_input(obs, real_env_steps, own_team) for obs in obses])
+        return state
 
     # Should be defined if you use multiplayer simultaneous action game
     def turns(self):
@@ -176,6 +182,12 @@ class Environment(BaseEnvironment):
             prev_factories_count = len(self.obs_list[-2]['player_0']['factories'][player])
             assert factories_count <= prev_factories_count
             rewards[player] = (factories_count - prev_factories_count) / 10  # 負の報酬 win rewardsを超えないように10でわる
+
+            # heavyが食われたら-1/20=-0.05
+            heavy_unit_count = len([unit_id for unit_id, unit in self.obs_list[-1]['player_0']['units'][player].items() if unit['unit_type']=='HEAVY'])
+            prev_heavy_unit_count = len([unit_id for unit_id, unit in self.obs_list[-2]['player_0']['units'][player].items() if unit['unit_type']=='HEAVY'])
+            if heavy_unit_count < prev_heavy_unit_count:
+                rewards[player] = (heavy_unit_count - prev_heavy_unit_count) / 20
         return rewards
 
 

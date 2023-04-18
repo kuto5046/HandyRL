@@ -24,7 +24,7 @@ import psutil
 
 from .environment import prepare_env, make_env
 from .util import map_r, bimap_r, trimap_r, rotate
-from .model import to_torch, to_gpu, ModelWrapper
+from .model import to_torch, to_gpu, ModelWrapper, OnnxModelWrapper
 from .losses import compute_target
 from .connection import MultiProcessJobExecutor
 from .worker import WorkerCluster, WorkerServer

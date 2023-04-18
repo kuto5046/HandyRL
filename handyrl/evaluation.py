@@ -85,6 +85,7 @@ def exec_match(env, agents, critic=None, show=False, game_args={}):
         return None
     for agent in agents.values():
         agent.reset(env, show=show)
+    start_time = time.time()
     while not env.terminal():
         # print(env)
         if show:
@@ -106,6 +107,8 @@ def exec_match(env, agents, critic=None, show=False, game_args={}):
     outcome = env.outcome()
     if show:
         print('final outcome = %s' % outcome)
+    
+    print(f"[eval]{time.time()-start_time}s")
     return outcome
 
 
@@ -360,7 +363,7 @@ def load_model(model_path, model=None):
         return model
     assert model is not None
     import torch
-    from .model import ModelWrapper
+    from .model import ModelWrapper, OnnxModelWrapper
     model.load_state_dict(torch.load(model_path))
     model.eval()
     return ModelWrapper(model)

@@ -10,8 +10,8 @@ import pickle
 import numpy as np
 import time 
 from .util import softmax
-from exp.exp042.agent import get_factory_actions, get_robot_actions
-from exp.exp042.src.observation import robot_action_to_label
+from exp.exp044.agent import get_factory_actions, get_robot_actions
+from exp.exp044.src.observation import robot_action_to_label
 
 
 class Generator:
@@ -29,7 +29,7 @@ class Generator:
         err = self.env.reset()
         if err:
             return None
-
+        start_time = time.time()
         while not self.env.terminal():
             moment_keys = ['observation', 'selected_prob', 'action_mask', 'action', 'value', 'reward', 'return']
             moment = {key: {p: None for p in self.env.players()} for key in moment_keys}
@@ -92,6 +92,7 @@ class Generator:
                     moment['action'][player] = action_map
 
             err = self.env.step(output_actions)
+            # print(f'[Gen] step: {self.env.env.state.real_env_steps} {self.env}')
             if err:
                 return None
 
@@ -102,6 +103,7 @@ class Generator:
             moment['turn'] = turn_players
             moments.append(moment)
 
+        print(f"[Gen] {time.time() - start_time}s")
         if len(moments) < 1:
             return None
 
