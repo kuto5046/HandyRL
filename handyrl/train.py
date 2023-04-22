@@ -222,7 +222,7 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
         losses[f'p_{key}'] = (-log_selected_policies * total_advantages[key]).sum()
     losses['p'] = torch.stack([loss for loss_name, loss in losses.items() if 'p_' in loss_name]).sum()
     if 'value' in outputs:
-        losses['v'] = ((outputs['value'] - targets['value']) ** 2).mul(omasks).sum() / 2
+        losses['v'] = args['value_cost'] * ((outputs['value'] - targets['value']) ** 2).mul(omasks).sum() / 2
     if 'return' in outputs:
         losses['r'] = F.smooth_l1_loss(outputs['return'], targets['return'], reduction='none').mul(omasks).sum()
     logits = outputs['robot_policy']
@@ -236,7 +236,7 @@ def compose_losses(outputs, log_selected_policies, total_advantages, targets, ba
     kl_loss = compute_teacher_kl_loss(logits, teacher_logits, amasks)
     losses['kl'] = kl_loss * args['kl_cost']
     losses['entropy'] = entropy_loss 
-    losses['total'] = base_loss + entropy_loss + losses['kl']
+    losses['total'] = base_loss #  + entropy_loss # + losses['kl']
 
     return losses, dcnt
 
@@ -349,7 +349,11 @@ class Batcher:
     def batch(self):
         return self.executor.recv()
 
-
+def set_bn_eval(model):
+    for module in model.modules():
+        if isinstance(module, nn.BatchNorm2d):
+            module.eval()
+    
 class Trainer:
     def __init__(self, args, model, teacher_model):
         self.episodes = deque()
@@ -389,6 +393,8 @@ class Trainer:
             self.wrapped_teacher_model.cuda()
         self.trained_model.train()
         self.wrapped_teacher_model.train()
+        set_bn_eval(self.trained_model.model)
+        set_bn_eval(self.wrapped_teacher_model.model)
         while data_cnt == 0 or not self.update_flag:
             batch = self.batcher.batch()
             batch_size = batch['value'].size(0)

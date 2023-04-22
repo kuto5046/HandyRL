@@ -10,8 +10,8 @@ import pickle
 import numpy as np
 import time 
 from .util import softmax
-from exp.exp044.agent import get_factory_actions, get_robot_actions
-from exp.exp044.src.observation import robot_action_to_label
+from exp.exp045.agent import get_factory_actions, get_robot_actions
+from exp.exp045.src.observation import robot_action_to_label
 
 
 class Generator:
@@ -103,7 +103,7 @@ class Generator:
             moment['turn'] = turn_players
             moments.append(moment)
 
-        print(f"[Gen] {time.time() - start_time}s")
+        # print(f"[Gen] {time.time() - start_time}s")
         if len(moments) < 1:
             return None
 

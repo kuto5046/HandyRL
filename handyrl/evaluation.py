@@ -108,7 +108,7 @@ def exec_match(env, agents, critic=None, show=False, game_args={}):
     if show:
         print('final outcome = %s' % outcome)
     
-    print(f"[eval]{time.time()-start_time}s")
+    # print(f"[eval]{time.time()-start_time}s")
     return outcome
 
 

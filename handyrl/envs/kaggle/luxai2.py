@@ -23,13 +23,13 @@ from ...environment import BaseEnvironment
 from lux.kit import obs_to_game_state, GameState, EnvConfig
 from luxai_s2 import LuxAI_S2
 from collections import deque 
-from exp.exp044.src.observation import make_input, get_team_lichen_map
-from exp.exp044.src.early_step_policy import _early_setup
-from exp.exp044.src.unet import LuxUNetModel
-from exp.exp044.src.validation import get_valid_robot_policy_map
+from exp.exp045.src.observation import make_input, get_team_lichen_map
+from exp.exp045.src.early_step_policy import _early_setup
+from exp.exp045.src.unet import LuxUNetModel
+from exp.exp045.src.validation import get_valid_robot_policy_map
 
-MODEL_PATH = '/home/user/work/exp/exp044/models/best_all_model.pth'
-TEACHER_MODEL_PATH = '/home/user/work/exp/exp044/models/best_all_model.pth'
+MODEL_PATH = '/home/user/work/exp/exp045/models/best_all_model.pth'
+TEACHER_MODEL_PATH = '/home/user/work/exp/exp045/models/best_all_model.pth'
 
 seed = 2022
 
@@ -143,20 +143,22 @@ class Environment(BaseEnvironment):
         model.load_state_dict(torch.load(TEACHER_MODEL_PATH))
         for param in model.parameters():
             param.requires_grad = False
-        return model 
+        self.set_bn_eval(model)
+        return model
  
+
+    def set_bn_eval(self, model):
+        for module in model.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                module.eval()
+
 
     def fix_net_parameters(self, model):
         for param in model.parameters():
             param.requires_grad = False
-        layers = list(model.children())
-        value_layer = layers[-1]
-        policy_layer = layers[-4]
-        print(f'train only following layer: \n{policy_layer} \n{value_layer}')
-        for param in value_layer.parameters():
-            param.requires_grad = True
-        for param in policy_layer.parameters():
-            param.requires_grad = True
+        for param in model.value_net.parameters():
+            param.requires_grad=True
+        self.set_bn_eval(model)
         return model 
 
     def observation(self, player=None):
